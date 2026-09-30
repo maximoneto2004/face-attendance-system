@@ -10,7 +10,9 @@
     "postinstall": "prisma generate",
     "typecheck": "tsc --noEmit",
     "db:migrate": "prisma migrate dev",
-    "db:deploy": "prisma migrate deploy"
+    "db:deploy": "prisma migrate deploy",
+    "user:create": "tsx scripts/create-user.ts",
+    "face:test": "tsx scripts/face-smoke-test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-rekognition": "^3.1144.0",
