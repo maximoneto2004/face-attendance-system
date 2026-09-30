@@ -1,0 +1,166 @@
+// Prisma schema — sistema de chamada por reconhecimento facial.
+//
+// Dados biométricos: somente os modelos FaceIdentity (IDs de rostos no AWS
+// Rekognition) e DetectedFace.cropImage (recorte temporário, apagado ao
+// confirmar/descartar a chamada) guardam informação facial. Nenhum embedding
+// é armazenado aqui — o Rekognition cuida disso.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  attendanceSessions AttendanceSession[]
+
+  @@map("users")
+}
+
+model Student {
+  id        String   @id @default(cuid())
+  name      String
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  classrooms     ClassroomStudent[]
+  attendances    Attendance[]
+  faceIdentities FaceIdentity[]
+
+  @@map("students")
+}
+
+// "Turma". Nomeado Classroom para não colidir com a palavra reservada `class`.
+model Classroom {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  students           ClassroomStudent[]
+  attendanceSessions AttendanceSession[]
+
+  @@map("classes")
+}
+
+model ClassroomStudent {
+  classroomId String
+  studentId   String
+  createdAt   DateTime @default(now())
+
+  classroom Classroom @relation(fields: [classroomId], references: [id], onDelete: Cascade)
+  student   Student   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@id([classroomId, studentId])
+  @@index([studentId])
+  @@map("class_students")
+}
+
+enum AttendanceSessionStatus {
+  REVIEW // rostos detectados, aguardando revisão do professor
+  CONFIRMED // presenças gravadas
+}
+
+model AttendanceSession {
+  id              String                  @id @default(cuid())
+  classroomId     String
+  takenAt         DateTime                @default(now())
+  status          AttendanceSessionStatus @default(REVIEW)
+  facesDetected   Int                     @default(0)
+  // Rostos reconhecidos automaticamente (acima do AUTO_ACCEPT_THRESHOLD).
+  recognizedCount Int                     @default(0)
+  createdById     String
+  createdAt       DateTime                @default(now())
+  confirmedAt     DateTime?
+
+  classroom     Classroom      @relation(fields: [classroomId], references: [id], onDelete: Cascade)
+  createdBy     User           @relation(fields: [createdById], references: [id])
+  detectedFaces DetectedFace[]
+  attendances   Attendance[]
+
+  @@index([classroomId, takenAt])
+  @@map("attendance_sessions")
+}
+
+enum DetectedFaceStatus {
+  AUTO // similaridade >= AUTO_ACCEPT_THRESHOLD
+  REVIEW // REVIEW_THRESHOLD <= similaridade < AUTO_ACCEPT_THRESHOLD
+  UNKNOWN // sem correspondência confiável
+}
+
+// Rosto encontrado na foto coletiva de uma chamada.
+model DetectedFace {
+  id                 String             @id @default(cuid())
+  sessionId          String
+  position           Int
+  // Bounding box relativa (0..1) retornada pelo Rekognition: { left, top, width, height }.
+  boundingBox        Json
+  // DADO BIOMÉTRICO TEMPORÁRIO: recorte JPEG do rosto, usado apenas na tela de
+  // revisão e para indexar rostos confirmados. Apagado (null) ao confirmar a chamada.
+  cropImage          Bytes?
+  status             DetectedFaceStatus
+  suggestedStudentId String?
+  similarity         Float?
+  // Aluno atribuído na confirmação (null = ignorado / não é aluno).
+  assignedStudentId  String?
+
+  session AttendanceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@map("detected_faces")
+}
+
+enum AttendanceMethod {
+  FACIAL_AUTO
+  FACIAL_CONFIRMED
+  MANUAL
+}
+
+model Attendance {
+  id         String            @id @default(cuid())
+  sessionId  String
+  studentId  String
+  present    Boolean
+  // Preenchido somente quando present = true.
+  method     AttendanceMethod?
+  similarity Float?
+  createdAt  DateTime          @default(now())
+
+  session AttendanceSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  student Student           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, studentId])
+  @@index([studentId])
+  @@map("attendances")
+}
+
+// DADO BIOMÉTRICO: vínculo entre um aluno e um rosto indexado na Collection do
+// AWS Rekognition. Só é criado após confirmação manual do professor.
+// Para excluir a identidade facial de um aluno, remova os rostos no Rekognition
+// (src/lib/face-identity.ts) — os registros aqui são apagados junto.
+model FaceIdentity {
+  id                String   @id @default(cuid())
+  studentId         String
+  rekognitionFaceId String   @unique
+  // Confiança de detecção informada pelo Rekognition ao indexar.
+  confidence        Float?
+  sourceSessionId   String?
+  createdAt         DateTime @default(now())
+
+  student Student @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId])
+  @@map("face_identities")
+}
