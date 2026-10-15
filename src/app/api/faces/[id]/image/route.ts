@@ -8,7 +8,12 @@ export async function GET(_request: Request, { params }: RouteContext<"/api/face
   if (!user) return Response.json({ error: "Não autenticado." }, { status: 401 });
 
   const { id } = await params;
-  const face = await db.detectedFace.findUnique({ where: { id }, select: { cropImage: true } });
+  // Filtrar o campo opcional no banco evita que o adaptador tente decodificar
+  // um BYTEA nulo enquanto a confirmação da chamada limpa os recortes.
+  const face = await db.detectedFace.findFirst({
+    where: { id, cropImage: { not: null } },
+    select: { cropImage: true },
+  });
   if (!face?.cropImage) return Response.json({ error: "Imagem indisponível." }, { status: 404 });
 
   return new Response(new Uint8Array(face.cropImage), {

@@ -12,7 +12,11 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "user:create": "tsx scripts/create-user.ts",
-    "face:test": "tsx scripts/face-smoke-test.ts"
+    "face:test": "tsx scripts/face-smoke-test.ts",
+    "face:batch-test": "tsx scripts/face-batch-test.ts",
+    "mvp:e2e": "node --conditions=react-server --import tsx scripts/mvp-e2e-test.ts",
+    "mvp:report-data": "tsx scripts/mvp-report-data.ts",
+    "evidence:capture": "tsx scripts/capture-evidence.ts"
   },
   "dependencies": {
     "@aws-sdk/client-rekognition": "^3.1144.0",
@@ -27,6 +31,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/pg": "^8.23.1",

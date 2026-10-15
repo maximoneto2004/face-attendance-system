@@ -44,6 +44,11 @@ credentials
 /uploads/
 /tmp/
 /test-photos/
+/fotos/
+/planning/provas/*.png
+/planning/provas/*.jpg
+/planning/provas/*.jpeg
+/planning/provas/*.webp
 *.tmp
 
 # vercel
