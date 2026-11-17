@@ -174,14 +174,31 @@ Cadastra o rosto da foto A, detecta todos os rostos da foto B (pode ser foto de 
 informa se a pessoa da foto A foi reconhecida. O rosto de teste é removido ao final.
 (Coloque fotos de teste em `test-photos/` — a pasta é ignorada pelo git.)
 
-### 6. Criar o professor e rodar
+### 6. Criar o primeiro acesso e rodar
 
 ```bash
-npm run user:create -- professor@exemplo.org "uma-senha-forte" "Nome do Professor"
+npm run user:create -- coordenacao@exemplo.org "uma-senha-forte" "Coordenação" --coordenacao
 npm run dev            # http://localhost:3000
 ```
 
-Não há cadastro público; novos professores são criados pelo mesmo comando.
+Não há cadastro público. Depois do primeiro acesso de coordenação, os professores são criados pela
+própria tela **Professores** (sem linha de comando). O comando acima também redefine a senha de um
+acesso existente.
+
+### Perfis e acesso
+
+- **Coordenação**: vê e gerencia todas as turmas, cria acessos de professores, redefine senhas e
+  escolhe o professor responsável de cada turma (Turma → Configurações da turma).
+- **Professor**: vê apenas as turmas pelas quais é responsável, os alunos dessas turmas e as chamadas
+  delas. A turma criada por um professor já fica no nome dele.
+- **Login permanente**: o acesso fica salvo no aparelho e é renovado a cada uso (cookie de 400 dias,
+  o máximo aceito pelos navegadores). Redefinir a senha ou usar “Desconectar aparelhos” encerra o
+  acesso em todos os aparelhos daquela pessoa.
+
+**Ao atualizar uma instalação existente**, rode `npm run db:deploy`. A migração
+`teachers_and_roles` transforma o primeiro usuário criado em coordenação e coloca cada turma no nome do
+usuário que mais fez chamadas nela. Turmas sem chamadas ficam “sem professor” (só a coordenação vê) até
+serem atribuídas na tela da turma.
 
 ### Build e verificação
 
@@ -194,7 +211,9 @@ npm run build && npm start
 ## Principais fluxos
 
 1. **Turmas → criar turma → “Cadastrar novos alunos”** (um nome por linha) ou adicionar alunos existentes.
-2. **Nova chamada** → escolher turma → tirar/escolher a foto → **Processar foto**.
+2. **Nova chamada** → escolher turma → tirar/escolher a foto → **Processar foto**. Turmas grandes podem
+   usar até 5 fotos; os rostos são juntados e quem aparece em mais de uma foto é contado uma vez. Na
+   revisão, “Adicionar foto” inclui quem ficou de fora.
 3. **Revisão**: cada rosto aparece recortado com o status:
    - ✅ *Reconhecido* (já marcado; dá para trocar no seletor);
    - ⚠️ *Possível aluno* → **Confirmar** ou **Corrigir**;

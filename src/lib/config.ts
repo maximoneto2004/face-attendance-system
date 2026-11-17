@@ -31,3 +31,6 @@ export const faceConfig = {
 if (faceConfig.reviewThreshold > faceConfig.autoAcceptThreshold) {
   throw new Error("FACE_REVIEW_THRESHOLD não pode ser maior que FACE_AUTO_ACCEPT_THRESHOLD.");
 }
+
+// Chamadas abandonadas em revisão (com seus recortes) são descartadas após este prazo.
+export const STALE_REVIEW_MS = 24 * 60 * 60 * 1000;

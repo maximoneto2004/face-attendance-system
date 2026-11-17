@@ -6,7 +6,7 @@ import "server-only";
 // até a chamada ser confirmada ou descartada.
 
 import { db } from "@/lib/db";
-import { faceConfig } from "@/lib/config";
+import { STALE_REVIEW_MS, faceConfig } from "@/lib/config";
 import { cropFace, normalizePhoto } from "@/lib/face-images";
 import {
   FaceServiceError,
@@ -20,8 +20,6 @@ import type { AttendanceMethod, DetectedFaceStatus } from "@/generated/prisma/cl
 
 export class AttendanceError extends Error {}
 
-// Chamadas abandonadas em revisão (com seus recortes) são descartadas após este prazo.
-const STALE_REVIEW_MS = 24 * 60 * 60 * 1000;
 const SEARCH_CONCURRENCY = 4;
 
 async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>) {
@@ -44,30 +42,20 @@ function classifySimilarity(similarity: number | null): DetectedFaceStatus {
   return "UNKNOWN";
 }
 
-// Processa a foto da turma e cria uma chamada em revisão. Retorna o id da chamada.
-export async function processClassPhoto(input: {
-  classroomId: string;
-  userId: string;
-  photo: Buffer;
-}): Promise<string> {
-  const classroom = await db.classroom.findUnique({
-    where: { id: input.classroomId },
-    select: {
-      id: true,
-      students: { where: { student: { active: true } }, select: { studentId: true } },
-    },
-  });
-  if (!classroom) throw new AttendanceError("Turma não encontrada.");
-  if (classroom.students.length === 0) {
-    throw new AttendanceError("A turma não possui alunos ativos. Adicione alunos antes de fazer a chamada.");
-  }
-  const classStudentIds = new Set(classroom.students.map((s) => s.studentId));
+// Limite de rostos por chamada (somando todas as fotos), igual ao aceito na confirmação.
+export const MAX_FACES_PER_SESSION = 200;
 
-  await discardStaleReviewSessions();
+type AnalyzedFace = {
+  boundingBox: Awaited<ReturnType<typeof detectFaces>>[number]["boundingBox"];
+  crop: Buffer;
+  match: { studentId: string; similarity: number } | null;
+};
 
+// Detecta, recorta e procura cada rosto de uma foto. A foto só existe em memória.
+async function analyzePhoto(input: Buffer, classStudentIds: Set<string>): Promise<AnalyzedFace[]> {
   let photo;
   try {
-    photo = await normalizePhoto(input.photo);
+    photo = await normalizePhoto(input);
   } catch {
     throw new AttendanceError("Não foi possível ler a imagem. Envie uma foto JPEG ou PNG.");
   }
@@ -100,51 +88,132 @@ export async function processClassPhoto(input: {
   const studentByFaceId = new Map(identities.map((i) => [i.rekognitionFaceId, i.studentId]));
 
   // Melhor correspondência de cada rosto, considerando só alunos desta turma.
-  const bestMatches = searchResults.map((matches) => {
+  return faces.map((face, i) => {
     let best: { studentId: string; similarity: number } | null = null;
-    for (const m of matches ?? []) {
+    for (const m of searchResults[i] ?? []) {
       const studentId = studentByFaceId.get(m.faceId);
       if (!studentId || !classStudentIds.has(studentId)) continue;
       if (!best || m.similarity > best.similarity) best = { studentId, similarity: m.similarity };
     }
-    return best;
+    return { boundingBox: face.boundingBox, crop: crops[i]!, match: best };
   });
+}
 
-  // 5. Um aluno não pode aparecer em dois rostos: mantém só a maior similaridade.
+// Transforma os rostos analisados em registros de DetectedFace.
+// `alreadySuggested`: alunos já sugeridos em fotos anteriores da mesma chamada.
+function buildDetectedFaces(analyzed: AnalyzedFace[], alreadySuggested: Set<string>, firstPosition: number) {
+  // Um aluno não pode aparecer em dois rostos: mantém só a maior similaridade.
   const bestFaceForStudent = new Map<string, number>();
-  bestMatches.forEach((match, i) => {
+  analyzed.forEach(({ match }, i) => {
     if (!match) return;
     const current = bestFaceForStudent.get(match.studentId);
-    if (current === undefined || bestMatches[current]!.similarity < match.similarity) {
+    if (current === undefined || analyzed[current]!.match!.similarity < match.similarity) {
       bestFaceForStudent.set(match.studentId, i);
     }
   });
 
-  const detectedFaces = faces.map((face, i) => {
-    const match = bestMatches[i];
-    const kept = match && bestFaceForStudent.get(match.studentId) === i ? match : null;
+  let duplicates = 0;
+  const records = [];
+  for (const [i, face] of analyzed.entries()) {
+    let kept = face.match && bestFaceForStudent.get(face.match.studentId) === i ? face.match : null;
+    if (kept && alreadySuggested.has(kept.studentId)) {
+      // Aluno já reconhecido em outra foto desta chamada: se a confiança é alta, é a
+      // mesma pessoa e o rosto repetido é descartado; senão, fica para o professor decidir.
+      if (kept.similarity >= faceConfig.autoAcceptThreshold) {
+        duplicates++;
+        continue;
+      }
+      kept = null;
+    }
     const status = classifySimilarity(kept?.similarity ?? null);
-    return {
-      position: i,
+    records.push({
+      position: firstPosition + records.length,
       boundingBox: face.boundingBox,
-      cropImage: new Uint8Array(crops[i]),
+      cropImage: new Uint8Array(face.crop),
       status,
       suggestedStudentId: status === "UNKNOWN" ? null : kept!.studentId,
       similarity: status === "UNKNOWN" ? null : kept!.similarity,
-    };
+    });
+  }
+  return { records, duplicates };
+}
+
+async function activeClassStudentIds(classroomId: string) {
+  const classroom = await db.classroom.findUnique({
+    where: { id: classroomId },
+    select: { students: { where: { student: { active: true } }, select: { studentId: true } } },
   });
+  if (!classroom) throw new AttendanceError("Turma não encontrada.");
+  if (classroom.students.length === 0) {
+    throw new AttendanceError("A turma não possui alunos ativos. Adicione alunos antes de fazer a chamada.");
+  }
+  return new Set(classroom.students.map((s) => s.studentId));
+}
+
+// Processa a foto da turma e cria uma chamada em revisão. Retorna o id da chamada.
+export async function processClassPhoto(input: {
+  classroomId: string;
+  userId: string;
+  photo: Buffer;
+}): Promise<string> {
+  const classStudentIds = await activeClassStudentIds(input.classroomId);
+  await discardStaleReviewSessions();
+
+  const analyzed = await analyzePhoto(input.photo, classStudentIds);
+  const { records } = buildDetectedFaces(analyzed, new Set(), 0);
 
   const session = await db.attendanceSession.create({
     data: {
-      classroomId: classroom.id,
+      classroomId: input.classroomId,
       createdById: input.userId,
-      facesDetected: faces.length,
-      recognizedCount: detectedFaces.filter((f) => f.status === "AUTO").length,
-      detectedFaces: { create: detectedFaces },
+      facesDetected: records.length,
+      recognizedCount: records.filter((f) => f.status === "AUTO").length,
+      detectedFaces: { create: records },
     },
     select: { id: true },
   });
   return session.id;
+}
+
+// Acrescenta outra foto a uma chamada ainda em revisão (turma grande que não coube
+// em uma foto, ou alunos que chegaram depois). Rostos repetidos são descartados.
+export async function addPhotoToSession(input: { sessionId: string; photo: Buffer }) {
+  const session = await db.attendanceSession.findUnique({
+    where: { id: input.sessionId },
+    select: {
+      id: true,
+      status: true,
+      classroomId: true,
+      detectedFaces: { select: { position: true, suggestedStudentId: true } },
+    },
+  });
+  if (!session) throw new AttendanceError("Chamada não encontrada.");
+  if (session.status !== "REVIEW") throw new AttendanceError("Esta chamada já foi confirmada.");
+
+  const classStudentIds = await activeClassStudentIds(session.classroomId);
+  const analyzed = await analyzePhoto(input.photo, classStudentIds);
+  const alreadySuggested = new Set(
+    session.detectedFaces.map((f) => f.suggestedStudentId).filter((id): id is string => id !== null),
+  );
+  const nextPosition = Math.max(-1, ...session.detectedFaces.map((f) => f.position)) + 1;
+  const { records, duplicates } = buildDetectedFaces(analyzed, alreadySuggested, nextPosition);
+
+  if (session.detectedFaces.length + records.length > MAX_FACES_PER_SESSION) {
+    throw new AttendanceError(`Limite de ${MAX_FACES_PER_SESSION} rostos por chamada atingido.`);
+  }
+  if (records.length > 0) {
+    await db.$transaction([
+      db.detectedFace.createMany({ data: records.map((r) => ({ ...r, sessionId: session.id })) }),
+      db.attendanceSession.update({
+        where: { id: session.id },
+        data: {
+          facesDetected: { increment: records.length },
+          recognizedCount: { increment: records.filter((f) => f.status === "AUTO").length },
+        },
+      }),
+    ]);
+  }
+  return { added: records.length, duplicates };
 }
 
 export type ConfirmInput = {

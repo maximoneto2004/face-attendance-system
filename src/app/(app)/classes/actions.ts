@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
+import { canAccessClassroom, isAdmin } from "@/lib/access";
 import { firstIssue, type FormState } from "@/lib/form";
 
 const classroomSchema = z.object({
@@ -16,21 +17,33 @@ const classroomSchema = z.object({
     .transform((v) => v || null),
 });
 
+// Coordenação escolhe o professor responsável; vazio = sem professor.
+async function teacherFromForm(formData: FormData): Promise<string | null | undefined> {
+  if (!formData.has("teacherId")) return undefined; // campo ausente: não altera
+  const teacherId = String(formData.get("teacherId") ?? "");
+  if (!teacherId) return null;
+  const exists = await db.user.count({ where: { id: teacherId } });
+  return exists ? teacherId : undefined;
+}
+
 export async function createClassroom(_state: FormState, formData: FormData): Promise<FormState> {
-  await requireUser();
+  const user = await requireUser();
   const parsed = classroomSchema.safeParse({
     name: formData.get("name"),
     description: formData.get("description") ?? "",
   });
   if (!parsed.success) return { error: firstIssue(parsed.error) };
 
-  const classroom = await db.classroom.create({ data: parsed.data });
+  // O professor que cria a turma passa a ser o responsável por ela.
+  const teacherId = isAdmin(user) ? ((await teacherFromForm(formData)) ?? null) : user.id;
+  const classroom = await db.classroom.create({ data: { ...parsed.data, teacherId } });
   redirect(`/classes/${classroom.id}`);
 }
 
 export async function updateClassroom(_state: FormState, formData: FormData): Promise<FormState> {
-  await requireUser();
+  const user = await requireUser();
   const id = String(formData.get("id") ?? "");
+  if (!(await canAccessClassroom(user, id))) return { error: "Turma não encontrada." };
   const parsed = classroomSchema.extend({ active: z.boolean() }).safeParse({
     name: formData.get("name"),
     description: formData.get("description") ?? "",
@@ -38,15 +51,22 @@ export async function updateClassroom(_state: FormState, formData: FormData): Pr
   });
   if (!parsed.success) return { error: firstIssue(parsed.error) };
 
-  const updated = await db.classroom.updateMany({ where: { id }, data: parsed.data });
+  // Só a coordenação troca o professor responsável.
+  const teacherId = isAdmin(user) ? await teacherFromForm(formData) : undefined;
+  const updated = await db.classroom.updateMany({
+    where: { id },
+    data: { ...parsed.data, ...(teacherId !== undefined ? { teacherId } : {}) },
+  });
   if (updated.count === 0) return { error: "Turma não encontrada." };
   revalidatePath(`/classes/${id}`);
-  return {};
+  revalidatePath("/classes");
+  return { success: "Alterações salvas." };
 }
 
 export async function addStudentsToClassroom(_state: FormState, formData: FormData): Promise<FormState> {
-  await requireUser();
+  const user = await requireUser();
   const classroomId = String(formData.get("classroomId") ?? "");
+  if (!(await canAccessClassroom(user, classroomId))) return { error: "Turma não encontrada." };
   const studentIds = formData.getAll("studentIds").map(String).filter(Boolean);
   if (studentIds.length === 0) return { error: "Selecione ao menos um aluno." };
 
@@ -54,12 +74,12 @@ export async function addStudentsToClassroom(_state: FormState, formData: FormDa
   if (!classroom) return { error: "Turma não encontrada." };
   const students = await db.student.findMany({ where: { id: { in: studentIds } }, select: { id: true } });
 
-  await db.classroomStudent.createMany({
+  const added = await db.classroomStudent.createMany({
     data: students.map((s) => ({ classroomId, studentId: s.id })),
     skipDuplicates: true,
   });
   revalidatePath(`/classes/${classroomId}`);
-  return {};
+  return { success: `${added.count} ${added.count === 1 ? "aluno adicionado" : "alunos adicionados"} à turma.` };
 }
 
 const namesSchema = z
@@ -69,8 +89,9 @@ const namesSchema = z
 
 // Cadastra novos alunos (um nome por linha) já vinculados à turma.
 export async function createStudentsInClassroom(_state: FormState, formData: FormData): Promise<FormState> {
-  await requireUser();
+  const user = await requireUser();
   const classroomId = String(formData.get("classroomId") ?? "");
+  if (!(await canAccessClassroom(user, classroomId))) return { error: "Turma não encontrada." };
   const names = String(formData.get("names") ?? "")
     .split(/\r?\n/)
     .map((n) => n.trim())
@@ -88,13 +109,15 @@ export async function createStudentsInClassroom(_state: FormState, formData: For
   );
   revalidatePath(`/classes/${classroomId}`);
   revalidatePath("/students");
-  return {};
+  const count = parsed.data.length;
+  return { success: `${count} ${count === 1 ? "aluno cadastrado" : "alunos cadastrados"} e adicionado${count === 1 ? "" : "s"} à turma.` };
 }
 
 export async function removeStudentFromClassroom(formData: FormData) {
-  await requireUser();
+  const user = await requireUser();
   const classroomId = String(formData.get("classroomId") ?? "");
   const studentId = String(formData.get("studentId") ?? "");
+  if (!(await canAccessClassroom(user, classroomId))) return;
   await db.classroomStudent.deleteMany({ where: { classroomId, studentId } });
   revalidatePath(`/classes/${classroomId}`);
 }
