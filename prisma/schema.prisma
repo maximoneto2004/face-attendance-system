@@ -14,14 +14,23 @@ datasource db {
   provider = "postgresql"
 }
 
+enum UserRole {
+  ADMIN // coordenação: vê e gerencia todas as turmas e professores
+  TEACHER // professor: vê apenas as turmas pelas quais é responsável
+}
+
 model User {
-  id           String   @id @default(cuid())
-  name         String
-  email        String   @unique
-  passwordHash String
-  createdAt    DateTime @default(now())
+  id             String   @id @default(cuid())
+  name           String
+  email          String   @unique
+  passwordHash   String
+  role           UserRole @default(TEACHER)
+  // Incrementado para desconectar todos os aparelhos (ex.: senha redefinida).
+  sessionVersion Int      @default(0)
+  createdAt      DateTime @default(now())
 
   attendanceSessions AttendanceSession[]
+  classrooms         Classroom[]
 
   @@map("users")
 }
@@ -46,11 +55,16 @@ model Classroom {
   name        String
   description String?
   active      Boolean  @default(true)
+  // Professor responsável. Sem professor, a turma aparece só para a coordenação.
+  teacherId   String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  teacher            User?              @relation(fields: [teacherId], references: [id], onDelete: SetNull)
   students           ClassroomStudent[]
   attendanceSessions AttendanceSession[]
+
+  @@index([teacherId])
 
   @@map("classes")
 }

@@ -1,43 +1,21 @@
-import Link from "next/link";
 import { requireUser } from "@/lib/auth";
-import { logout } from "@/app/login/actions";
-
-const navItems = [
-  { href: "/", label: "Início" },
-  { href: "/attendance/new", label: "Nova chamada" },
-  { href: "/attendance", label: "Histórico" },
-  { href: "/classes", label: "Turmas" },
-  { href: "/students", label: "Alunos" },
-];
+import { db } from "@/lib/db";
+import { isAdmin, sessionScope } from "@/lib/access";
+import { AppNav } from "@/components/app-nav";
 
 export default async function AppLayout({ children }: LayoutProps<"/">) {
   const user = await requireUser();
+  const reviewCount = await db.attendanceSession.count({ where: { status: "REVIEW", ...sessionScope(user) } });
 
   return (
     <div className="min-h-screen">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
-          <Link href="/" className="font-semibold text-indigo-600">
-            Chamada Facial
-          </Link>
-          <nav className="flex flex-wrap gap-4 text-sm text-slate-600">
-            {navItems.map((item) => (
-              <Link key={item.href} href={item.href} className="hover:text-slate-900">
-                {item.label}
-              </Link>
-            ))}
-          </nav>
-          <div className="ml-auto flex items-center gap-3 text-sm text-slate-500">
-            <span>{user.name}</span>
-            <form action={logout}>
-              <button type="submit" className="text-slate-500 hover:text-slate-900">
-                Sair
-              </button>
-            </form>
-          </div>
-        </div>
-      </header>
-      <main className="mx-auto max-w-6xl px-4 py-8">{children}</main>
+      <AppNav userName={user.name} reviewCount={reviewCount} isAdmin={isAdmin(user)} />
+      {/* pb extra no celular: espaço para a barra de navegação inferior */}
+      <div className="lg:pl-64">
+        <main className="mx-auto max-w-6xl px-4 pt-6 pb-[calc(6rem+env(safe-area-inset-bottom))] sm:px-6 lg:px-8 lg:pt-10 lg:pb-12">
+          {children}
+        </main>
+      </div>
     </div>
   );
 }

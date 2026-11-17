@@ -1,71 +1,71 @@
-import Link from "next/link";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
-import { Badge, Card, EmptyState, PageHeader } from "@/components/ui";
+import { classroomScope, isAdmin, sessionScope, studentScope } from "@/lib/access";
+import { Card, CardHeader, PageHeader, plural } from "@/components/ui";
 import { CreateStudentForm } from "./create-student-form";
+import { StudentsDirectory } from "./students-directory";
 
 export default async function StudentsPage() {
-  await requireUser();
-  const students = await db.student.findMany({
-    orderBy: [{ active: "desc" }, { name: "asc" }],
-    select: {
-      id: true,
-      name: true,
-      active: true,
-      _count: { select: { faceIdentities: true } },
-      classrooms: { select: { classroom: { select: { name: true } } } },
-    },
-  });
+  const user = await requireUser();
+  const [students, attendanceStats, myClassrooms] = await Promise.all([
+    db.student.findMany({
+      where: studentScope(user),
+      orderBy: [{ active: "desc" }, { name: "asc" }],
+      select: {
+        id: true,
+        name: true,
+        active: true,
+        _count: { select: { faceIdentities: true } },
+        classrooms: { where: { classroom: classroomScope(user) }, select: { classroom: { select: { name: true } } } },
+      },
+    }),
+    db.attendance.groupBy({ by: ["studentId", "present"], where: { session: sessionScope(user) }, _count: true }),
+    db.classroom.findMany({
+      where: { active: true, ...classroomScope(user) },
+      orderBy: { name: "asc" },
+      select: { id: true, name: true },
+    }),
+  ]);
+
+  const stats = new Map<string, { present: number; total: number }>();
+  for (const row of attendanceStats) {
+    const s = stats.get(row.studentId) ?? { present: 0, total: 0 };
+    s.total += row._count;
+    if (row.present) s.present += row._count;
+    stats.set(row.studentId, s);
+  }
+  const active = students.filter((s) => s.active).length;
 
   return (
     <>
-      <PageHeader title="Alunos" description={`${students.length} aluno(s) cadastrado(s)`} />
+      <PageHeader
+        title="Alunos"
+        description={`${plural(active, "aluno ativo", "alunos ativos")} · ${plural(students.length, "cadastrado", "cadastrados")} no total`}
+      />
       <Card className="mb-6">
-        <h2 className="mb-3 text-sm font-medium">Novo aluno</h2>
-        <CreateStudentForm />
-        <p className="mt-2 text-xs text-slate-500">
-          Dica: para cadastrar vários alunos de uma vez, abra a turma e use “Cadastrar novos alunos”.
-        </p>
+        <CardHeader
+          icon="userPlus"
+          title="Adicionar aluno"
+          description="Para cadastrar vários de uma vez, abra a turma e use “Novos alunos”."
+        />
+        {!isAdmin(user) && myClassrooms.length === 0 ? (
+          <p className="text-sm text-slate-500">Crie uma turma primeiro: todo aluno precisa estar em uma das suas turmas.</p>
+        ) : (
+          <CreateStudentForm classrooms={myClassrooms} classroomRequired={!isAdmin(user)} />
+        )}
       </Card>
 
-      {students.length === 0 ? (
-        <EmptyState>Nenhum aluno cadastrado ainda.</EmptyState>
-      ) : (
-        <Card className="overflow-x-auto p-0">
-          <table className="w-full text-sm">
-            <thead className="border-b border-slate-200 text-left text-slate-500">
-              <tr>
-                <th className="px-5 py-3 font-medium">Nome</th>
-                <th className="px-5 py-3 font-medium">Turmas</th>
-                <th className="px-5 py-3 font-medium">Identidade facial</th>
-                <th className="px-5 py-3 font-medium">Situação</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {students.map((student) => (
-                <tr key={student.id} className="hover:bg-slate-50">
-                  <td className="px-5 py-3">
-                    <Link href={`/students/${student.id}`} className="font-medium text-indigo-600 hover:underline">
-                      {student.name}
-                    </Link>
-                  </td>
-                  <td className="px-5 py-3 text-slate-600">
-                    {student.classrooms.map((c) => c.classroom.name).join(", ") || "—"}
-                  </td>
-                  <td className="px-5 py-3">
-                    {student._count.faceIdentities > 0 ? (
-                      <Badge tone="green">Cadastrada ({student._count.faceIdentities})</Badge>
-                    ) : (
-                      <Badge>Sem rosto</Badge>
-                    )}
-                  </td>
-                  <td className="px-5 py-3">{student.active ? <Badge tone="indigo">Ativo</Badge> : <Badge>Inativo</Badge>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
-      )}
+      <StudentsDirectory
+        students={students.map((s) => ({
+          id: s.id,
+          name: s.name,
+          active: s.active,
+          faceCount: s._count.faceIdentities,
+          classrooms: s.classrooms.map((c) => c.classroom.name),
+          present: stats.get(s.id)?.present ?? 0,
+          total: stats.get(s.id)?.total ?? 0,
+        }))}
+      />
     </>
   );
 }

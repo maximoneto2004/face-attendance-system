@@ -1,6 +1,9 @@
 // Cria (ou redefine a senha de) um professor/administrador. Não há cadastro público.
 //
-//   npm run user:create -- <email> <senha> "<Nome>"
+//   npm run user:create -- <email> <senha> "<Nome>" [--coordenacao]
+//
+// --coordenacao: acesso de coordenação (vê e gerencia todas as turmas e professores).
+// Sem a opção, cria um professor (vê só as turmas pelas quais é responsável).
 
 import "dotenv/config";
 import { z } from "zod";
@@ -14,9 +17,11 @@ const args = z.tuple([
 ]);
 
 async function main() {
-  const parsed = args.safeParse(process.argv.slice(2));
+  const argv = process.argv.slice(2);
+  const role = argv.includes("--coordenacao") ? "ADMIN" : "TEACHER";
+  const parsed = args.safeParse(argv.filter((a) => a !== "--coordenacao"));
   if (!parsed.success) {
-    console.error('Uso: npm run user:create -- <email> <senha> "<Nome>"');
+    console.error('Uso: npm run user:create -- <email> <senha> "<Nome>" [--coordenacao]');
     console.error(parsed.error.issues.map((i) => `- ${i.message}`).join("\n"));
     process.exit(1);
   }
@@ -26,10 +31,12 @@ async function main() {
 
   const user = await db.user.upsert({
     where: { email },
-    create: { email, name, passwordHash },
-    update: { name, passwordHash },
+    create: { email, name, passwordHash, role },
+    // Redefinir a senha desconecta os aparelhos que usavam a antiga.
+    // Sem --coordenacao, o perfil de um usuário existente não muda.
+    update: { name, passwordHash, ...(role === "ADMIN" ? { role } : {}), sessionVersion: { increment: 1 } },
   });
-  console.log(`Usuário pronto: ${user.email}`);
+  console.log(`Usuário pronto: ${user.email} (${role === "ADMIN" ? "coordenação" : "professor"})`);
 }
 
 main()

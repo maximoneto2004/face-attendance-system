@@ -52,7 +52,7 @@ async function main() {
   await shot("04-nova-chamada.png");
 
   const photo = path.resolve("fotos", "WhatsApp Image 2026-10-14 at 19.03.43 (2).jpeg");
-  await page.locator('input[type="file"]').setInputFiles(photo);
+  await page.locator('input[type="file"][name="photo"]').setInputFiles(photo);
   await page.locator('img[alt="Pré-visualização da foto"]').waitFor();
   await shot("05-upload-foto.png");
 
@@ -65,19 +65,19 @@ async function main() {
     await page.waitForURL(/\/attendance\/[^/]+$/, { timeout: 120_000 });
   }
   await page.waitForFunction(
-    () => document.body.innerText.includes("Confirmar chamada") || document.body.innerText.includes("presente(s)"),
+    () => document.body.innerText.includes("Confirmar chamada") || document.body.innerText.includes("Taxa de presença"),
     undefined,
     { timeout: 120_000 },
   );
   if ((await page.getByRole("button", { name: "Confirmar chamada" }).count()) === 0) {
-    await page.getByText(/presente\(s\)/).first().waitFor();
+    await page.getByRole("heading", { name: /^Presentes/ }).waitFor();
     await shot("14-chamada-confirmada.png");
     await page.goto(`${baseUrl}/attendance`, { waitUntil: "networkidle" });
     await page.getByRole("heading", { name: "Histórico de chamadas" }).waitFor();
     await shot("15-historico.png");
     return;
   }
-  await page.getByText(/rosto\(s\) detectado\(s\)/).waitFor();
+  await page.getByText(/rostos? detectados?/).waitFor();
   await page.waitForFunction(
     () => {
       const images = [...document.querySelectorAll<HTMLImageElement>('img[alt="Rosto detectado"]')];
@@ -133,7 +133,7 @@ async function main() {
     return;
   }
   await page.getByRole("button", { name: "Confirmar chamada" }).click();
-  await page.getByText(/presente\(s\)/).first().waitFor({ timeout: 120_000 });
+  await page.getByRole("heading", { name: /^Presentes/ }).waitFor({ timeout: 120_000 });
   await shot("14-chamada-confirmada.png");
 
   await page.goto(`${baseUrl}/attendance`, { waitUntil: "networkidle" });

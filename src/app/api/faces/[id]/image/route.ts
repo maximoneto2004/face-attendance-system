@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
+import { sessionScope } from "@/lib/access";
 
 // DADO BIOMÉTRICO: serve o recorte de um rosto detectado apenas para usuários
 // autenticados, sem cache. O recorte deixa de existir quando a chamada é confirmada.
@@ -11,7 +12,7 @@ export async function GET(_request: Request, { params }: RouteContext<"/api/face
   // Filtrar o campo opcional no banco evita que o adaptador tente decodificar
   // um BYTEA nulo enquanto a confirmação da chamada limpa os recortes.
   const face = await db.detectedFace.findFirst({
-    where: { id, cropImage: { not: null } },
+    where: { id, cropImage: { not: null }, session: sessionScope(user) },
     select: { cropImage: true },
   });
   if (!face?.cropImage) return Response.json({ error: "Imagem indisponível." }, { status: 404 });

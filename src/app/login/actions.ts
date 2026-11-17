@@ -22,7 +22,7 @@ export async function login(_state: FormState, formData: FormData): Promise<Form
   if (!user || !(await verifyPassword(parsed.data.password, user.passwordHash))) {
     return { error: INVALID };
   }
-  await startSession(user.id);
+  await startSession(user);
   redirect("/");
 }
 
