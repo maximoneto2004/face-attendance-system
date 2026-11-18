@@ -7,6 +7,7 @@ import { requireUser } from "@/lib/auth";
 import { canAccessClassroom, canAccessStudent, isAdmin } from "@/lib/access";
 import { deleteStudentFaceIdentity, describeError } from "@/lib/attendance";
 import { firstIssue, type FormState } from "@/lib/form";
+import { trackEvent } from "@/lib/usage";
 
 const nameSchema = z.string().trim().min(2, "Informe o nome do aluno.").max(120, "Nome muito longo.");
 
@@ -30,6 +31,7 @@ export async function createStudent(_state: FormState, formData: FormData): Prom
   });
   revalidatePath("/students");
   if (classroomId) revalidatePath(`/classes/${classroomId}`);
+  await trackEvent(user.id, "Aluno cadastrado", { classroomId: classroomId || null });
   return { success: `Cadastro de ${student.name} concluído.` };
 }
 
@@ -68,5 +70,6 @@ export async function removeFaceIdentity(_state: FormState, formData: FormData):
     return { error: describeError(error) };
   }
   revalidatePath(`/students/${id.data}`);
+  await trackEvent(user.id, "Identidade facial excluída", { studentId: id.data });
   return { success: "Identidade facial excluída." };
 }

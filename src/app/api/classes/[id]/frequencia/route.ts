@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { classroomScope } from "@/lib/access";
+import { trackEvent } from "@/lib/usage";
 
 // Planilha de frequência da turma (CSV que abre direto no Excel/Google Planilhas).
 // Somente leitura. ?mes=AAAA-MM limita a um mês; sem parâmetro, traz todas as chamadas confirmadas.
@@ -84,6 +85,7 @@ export async function GET(request: Request, { params }: RouteContext<"/api/class
   lines.push("");
   lines.push(csvCell("P = presente · F = falta · vazio = aluno ainda não estava na turma"));
 
+  await trackEvent(user.id, "Planilha baixada", { classroomId: id, mes: range ? mes : "todas" });
   const filename = `frequencia-${slug(classroom.name) || "turma"}-${range ? mes : "completa"}.csv`;
   // BOM para o Excel reconhecer UTF-8 (acentos); ";" é o separador padrão do Excel em português.
   return new Response(`﻿${lines.join("\r\n")}\r\n`, {

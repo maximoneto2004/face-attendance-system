@@ -15,6 +15,14 @@ import {
   processClassPhoto,
 } from "@/lib/attendance";
 import type { FormState } from "@/lib/form";
+import { trackError, trackEvent } from "@/lib/usage";
+
+// Contagem de rostos por status de uma chamada (para o registro de uso).
+async function faceCounts(sessionId: string) {
+  const rows = await db.detectedFace.groupBy({ by: ["status"], where: { sessionId }, _count: true });
+  const get = (s: string) => rows.find((r) => r.status === s)?._count ?? 0;
+  return { faces: get("AUTO") + get("REVIEW") + get("UNKNOWN"), auto: get("AUTO"), review: get("REVIEW"), unknown: get("UNKNOWN") };
+}
 
 const MAX_PHOTO_BYTES = 12 * 1024 * 1024;
 
@@ -44,9 +52,12 @@ export async function createAttendanceSession(formData: FormData): Promise<{ err
       userId: user.id,
       photo: Buffer.from(await photo.arrayBuffer()),
     });
+    await trackEvent(user.id, "Chamada criada", { sessionId, classroomId: classroomId.data, ...(await faceCounts(sessionId)) });
     return { sessionId };
   } catch (error) {
-    return { error: describeError(error) };
+    const message = describeError(error);
+    await trackError(user.id, "Erro ao processar foto", message);
+    return { error: message };
   }
 }
 
@@ -63,10 +74,13 @@ export async function addAttendancePhoto(
 
   try {
     const result = await addPhotoToSession({ sessionId, photo: Buffer.from(await photo.arrayBuffer()) });
+    await trackEvent(user.id, "Foto adicionada à chamada", { sessionId, ...result });
     revalidatePath(`/attendance/${sessionId}`);
     return result;
   } catch (error) {
-    return { error: describeError(error) };
+    const message = describeError(error);
+    await trackError(user.id, "Erro ao adicionar foto", message);
+    return { error: message };
   }
 }
 
@@ -88,8 +102,30 @@ export async function confirmAttendanceSession(input: z.input<typeof confirmSche
   try {
     ({ warnings } = await confirmAttendance(parsed.data));
   } catch (error) {
-    return { error: describeError(error) };
+    const message = describeError(error);
+    await trackError(user.id, "Erro ao confirmar chamada", message);
+    return { error: message };
   }
+  const confirmed = await db.attendanceSession.findUnique({
+    where: { id: parsed.data.sessionId },
+    select: { createdAt: true, confirmedAt: true, facesDetected: true, classroomId: true },
+  });
+  const methods = await db.attendance.groupBy({
+    by: ["method"],
+    where: { sessionId: parsed.data.sessionId, present: true },
+    _count: true,
+  });
+  const byMethod = (m: string) => methods.find((r) => r.method === m)?._count ?? 0;
+  await trackEvent(user.id, "Chamada confirmada", {
+    sessionId: parsed.data.sessionId,
+    classroomId: confirmed?.classroomId ?? null,
+    seconds: confirmed?.confirmedAt ? Math.round((confirmed.confirmedAt.getTime() - confirmed.createdAt.getTime()) / 1000) : null,
+    faces: confirmed?.facesDetected ?? 0,
+    auto: byMethod("FACIAL_AUTO"),
+    confirmedByTeacher: byMethod("FACIAL_CONFIRMED"),
+    manual: byMethod("MANUAL"),
+    warnings: warnings.length,
+  });
   revalidatePath("/attendance");
   redirect(`/attendance/${parsed.data.sessionId}${warnings.length > 0 ? "?aviso=qualidade" : ""}`);
 }
@@ -120,6 +156,7 @@ export async function correctAttendance(formData: FormData) {
     where: { sessionId, studentId, session: { status: "CONFIRMED" } },
     data: present ? { present: true, method: "MANUAL", similarity: null } : { present: false, method: null, similarity: null },
   });
+  await trackEvent(user.id, "Presença corrigida", { sessionId, present });
   revalidatePath(`/attendance/${sessionId}`);
   revalidatePath("/attendance");
 }
@@ -127,7 +164,10 @@ export async function correctAttendance(formData: FormData) {
 export async function discardAttendanceSession(formData: FormData) {
   const user = await requireUser();
   const sessionId = String(formData.get("sessionId") ?? "");
-  if (await canAccessSession(user, sessionId)) await discardSession(sessionId);
+  if (await canAccessSession(user, sessionId)) {
+    await discardSession(sessionId);
+    await trackEvent(user.id, "Chamada descartada", { sessionId });
+  }
   revalidatePath("/attendance");
   redirect("/attendance");
 }

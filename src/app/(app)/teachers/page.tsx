@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { requireAdmin } from "@/lib/access";
+import { canGrantTech, isTech, requireAdmin } from "@/lib/access";
 import { Alert, Avatar, Badge, Card, CardHeader, PageHeader, plural } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { CreateTeacherForm, ManageTeacherForms } from "./forms";
 
 export default async function TeachersPage() {
   const me = await requireAdmin();
+  const allowTech = await canGrantTech(me);
   const [users, unassigned] = await Promise.all([
     db.user.findMany({
       orderBy: [{ role: "asc" }, { name: "asc" }],
@@ -51,7 +52,7 @@ export default async function TeachersPage() {
 
       <Card className="mb-6">
         <CardHeader icon="userPlus" title="Novo acesso" description="Crie um acesso para cada professor ou modalidade." />
-        <CreateTeacherForm />
+        <CreateTeacherForm allowTech={allowTech} />
       </Card>
 
       <ul className="space-y-4">
@@ -63,12 +64,18 @@ export default async function TeachersPage() {
                 <div className="min-w-0 flex-1">
                   <p className="flex flex-wrap items-center gap-2 font-semibold text-slate-900">
                     {u.name}
-                    {u.role === "ADMIN" ? <Badge tone="indigo" icon="shield">Coordenação</Badge> : <Badge>Professor</Badge>}
+                    {u.role === "TECH" ? (
+                      <Badge tone="green" icon="sparkles">Admin tech</Badge>
+                    ) : u.role === "ADMIN" ? (
+                      <Badge tone="indigo" icon="shield">Coordenação</Badge>
+                    ) : (
+                      <Badge>Professor</Badge>
+                    )}
                     {u.id === me.id && <Badge tone="green">Você</Badge>}
                   </p>
                   <p className="truncate text-sm text-slate-500">{u.email}</p>
                   <div className="mt-2 flex flex-wrap gap-1.5">
-                    {u.role === "ADMIN" ? (
+                    {u.role !== "TEACHER" ? (
                       <span className="text-xs text-slate-500">Vê todas as turmas.</span>
                     ) : u.classrooms.length === 0 ? (
                       <span className="text-xs text-amber-700">Nenhuma turma ainda — escolha este professor na configuração da turma.</span>
@@ -97,7 +104,11 @@ export default async function TeachersPage() {
                   <Icon name="chevronDown" className="h-4 w-4 text-slate-400 transition-transform group-open:rotate-180" />
                 </summary>
                 <div className="border-t border-slate-100 p-4 sm:p-5">
-                  <ManageTeacherForms user={u} isSelf={u.id === me.id} />
+                  {u.role === "TECH" && !isTech(me) ? (
+                    <p className="text-sm text-slate-500">Somente um administrador tech pode alterar este acesso.</p>
+                  ) : (
+                    <ManageTeacherForms user={u} isSelf={u.id === me.id} allowTech={allowTech} />
+                  )}
                 </div>
               </details>
             </Card>

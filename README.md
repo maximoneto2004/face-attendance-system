@@ -189,11 +189,19 @@ acesso existente.
 
 - **Coordenação**: vê e gerencia todas as turmas, cria acessos de professores, redefine senhas e
   escolhe o professor responsável de cada turma (Turma → Configurações da turma).
+- **Administrador tech**: tudo da coordenação + a tela **Uso do sistema** (quem usou, quando, telas e
+  botões acessados, funil da chamada, erros). O primeiro é concedido pela coordenação na tela
+  Professores (ou `npm run user:create -- ... --tech`); depois, só outro administrador tech concede ou
+  altera esse perfil.
 - **Professor**: vê apenas as turmas pelas quais é responsável, os alunos dessas turmas e as chamadas
   delas. A turma criada por um professor já fica no nome dele.
 - **Login permanente**: o acesso fica salvo no aparelho e é renovado a cada uso (cookie de 400 dias,
   o máximo aceito pelos navegadores). Redefinir a senha ou usar “Desconectar aparelhos” encerra o
   acesso em todos os aparelhos daquela pessoa.
+
+**Registro de uso**: telas abertas, cliques em botões e ações (login, chamada criada/confirmada,
+correções, planilhas, erros) ficam na tabela `usage_events` por 180 dias. Não guarda nomes nem imagens de
+alunos: rotas com id viram `:id` e botões que exibem nomes usam rótulos genéricos (`data-track`).
 
 **Ao atualizar uma instalação existente**, rode `npm run db:deploy`. A migração
 `teachers_and_roles` transforma o primeiro usuário criado em coordenação e coloca cada turma no nome do

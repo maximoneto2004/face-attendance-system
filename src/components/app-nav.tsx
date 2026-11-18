@@ -45,10 +45,12 @@ export function AppNav({
   userName,
   reviewCount,
   isAdmin = false,
+  isTech = false,
 }: {
   userName: string;
   reviewCount: number;
   isAdmin?: boolean;
+  isTech?: boolean;
 }) {
   const pathname = usePathname();
   const items: NavItem[] = [
@@ -59,7 +61,9 @@ export function AppNav({
   ];
   // Só a coordenação gerencia professores (no celular fica no menu da conta).
   const adminItem: NavItem = { href: "/teachers", label: "Professores", icon: "shield" };
-  const sidebarItems = isAdmin ? [...items, adminItem] : items;
+  const techItem: NavItem = { href: "/usage", label: "Uso do sistema", icon: "sparkles" };
+  const extraItems = [...(isAdmin ? [adminItem] : []), ...(isTech ? [techItem] : [])];
+  const sidebarItems = [...items, ...extraItems];
   const newActive = pathname.startsWith("/attendance/new");
 
   return (
@@ -131,15 +135,16 @@ export function AppNav({
             </summary>
             <div className="absolute right-0 mt-2 w-56 rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
               <p className="truncate px-3 py-2 text-sm font-medium text-slate-700">{userName}</p>
-              {isAdmin && (
+              {extraItems.map((item) => (
                 <Link
-                  href="/teachers"
+                  key={item.href}
+                  href={item.href}
                   className="flex h-11 w-full items-center gap-3 rounded-lg px-3 text-sm font-medium text-slate-600 hover:bg-slate-100"
                 >
-                  <Icon name="shield" className="h-4 w-4" />
-                  Professores
+                  <Icon name={item.icon} className="h-4 w-4" />
+                  {item.label}
                 </Link>
-              )}
+              ))}
               <LogoutButton className="flex h-11 w-full items-center gap-3 rounded-lg px-3 text-sm font-medium text-slate-600 hover:bg-slate-100" />
             </div>
           </details>

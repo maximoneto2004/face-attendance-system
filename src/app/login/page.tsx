@@ -76,6 +76,9 @@ export default function LoginPage() {
             </SubmitButton>
           </form>
           <p className="mt-6 text-center text-xs text-slate-500">Esqueceu a senha? Fale com o administrador do sistema.</p>
+          <p className="mt-2 text-center text-xs text-slate-400">
+            O uso do sistema (telas e botões acessados) é registrado para melhorar o serviço.
+          </p>
         </div>
       </section>
     </main>
