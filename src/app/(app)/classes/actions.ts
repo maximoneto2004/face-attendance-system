@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { canAccessClassroom, isAdmin } from "@/lib/access";
 import { firstIssue, type FormState } from "@/lib/form";
+import { trackEvent } from "@/lib/usage";
 
 const classroomSchema = z.object({
   name: z.string().trim().min(2, "Informe o nome da turma.").max(120, "Nome muito longo."),
@@ -37,6 +38,7 @@ export async function createClassroom(_state: FormState, formData: FormData): Pr
   // O professor que cria a turma passa a ser o responsável por ela.
   const teacherId = isAdmin(user) ? ((await teacherFromForm(formData)) ?? null) : user.id;
   const classroom = await db.classroom.create({ data: { ...parsed.data, teacherId } });
+  await trackEvent(user.id, "Turma criada", { classroomId: classroom.id });
   redirect(`/classes/${classroom.id}`);
 }
 
@@ -79,6 +81,7 @@ export async function addStudentsToClassroom(_state: FormState, formData: FormDa
     skipDuplicates: true,
   });
   revalidatePath(`/classes/${classroomId}`);
+  await trackEvent(user.id, "Alunos adicionados à turma", { classroomId, count: added.count });
   return { success: `${added.count} ${added.count === 1 ? "aluno adicionado" : "alunos adicionados"} à turma.` };
 }
 
@@ -110,6 +113,7 @@ export async function createStudentsInClassroom(_state: FormState, formData: For
   revalidatePath(`/classes/${classroomId}`);
   revalidatePath("/students");
   const count = parsed.data.length;
+  await trackEvent(user.id, "Alunos cadastrados em lote", { classroomId, count });
   return { success: `${count} ${count === 1 ? "aluno cadastrado" : "alunos cadastrados"} e adicionado${count === 1 ? "" : "s"} à turma.` };
 }
 

@@ -1,6 +1,7 @@
 import "server-only";
 // Regras de acesso por perfil.
 //
+// - Administrador tech (TECH): tudo da coordenação + dados de uso do sistema.
 // - Coordenação (ADMIN): vê e gerencia tudo, inclusive turmas sem professor.
 // - Professor (TEACHER): vê apenas as turmas pelas quais é responsável, os alunos
 //   dessas turmas e as chamadas delas.
@@ -13,7 +14,9 @@ import type { Prisma } from "@/generated/prisma/client";
 
 export type { CurrentUser };
 
-export const isAdmin = (user: Pick<CurrentUser, "role">) => user.role === "ADMIN";
+// TECH tem todos os poderes da coordenação.
+export const isAdmin = (user: Pick<CurrentUser, "role">) => user.role === "ADMIN" || user.role === "TECH";
+export const isTech = (user: Pick<CurrentUser, "role">) => user.role === "TECH";
 
 export function classroomScope(user: CurrentUser): Prisma.ClassroomWhereInput {
   return isAdmin(user) ? {} : { teacherId: user.id };
@@ -48,4 +51,15 @@ export async function requireAdmin() {
   const user = await requireUser();
   if (!isAdmin(user)) notFound();
   return user;
+}
+
+export async function requireTech() {
+  const user = await requireUser();
+  if (!isTech(user)) notFound();
+  return user;
+}
+
+// O primeiro administrador tech pode ser concedido pela coordenação; depois, só por outro tech.
+export async function canGrantTech(viewer: CurrentUser) {
+  return isTech(viewer) || (await db.user.count({ where: { role: "TECH" } })) === 0;
 }

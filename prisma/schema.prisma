@@ -17,6 +17,7 @@ datasource db {
 enum UserRole {
   ADMIN // coordenação: vê e gerencia todas as turmas e professores
   TEACHER // professor: vê apenas as turmas pelas quais é responsável
+  TECH // administrador tech: tudo da coordenação + dados de uso do sistema
 }
 
 model User {
@@ -31,6 +32,7 @@ model User {
 
   attendanceSessions AttendanceSession[]
   classrooms         Classroom[]
+  usageEvents        UsageEvent[]
 
   @@map("users")
 }
@@ -177,4 +179,24 @@ model FaceIdentity {
 
   @@index([studentId])
   @@map("face_identities")
+}
+
+// Registro de uso do sistema (telas abertas, cliques, ações). Visível só para TECH.
+// PRIVACIDADE: nunca grava nomes ou imagens de alunos; ids na URL viram ":id".
+// Apagado automaticamente após USAGE_RETENTION_DAYS.
+model UsageEvent {
+  id        String   @id @default(cuid())
+  userId    String?
+  type      String // page | click | action | error
+  name      String // ex.: "Processar foto", "attendance.confirmed"
+  path      String? // rota normalizada, ex.: /attendance/:id
+  tab       String? // identificador da aba do navegador (agrupa uma visita)
+  data      Json?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@map("usage_events")
 }

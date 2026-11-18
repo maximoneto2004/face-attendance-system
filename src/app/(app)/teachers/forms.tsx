@@ -42,7 +42,19 @@ function PasswordInput({ id }: { id: string }) {
   );
 }
 
-export function CreateTeacherForm() {
+type Role = "ADMIN" | "TEACHER" | "TECH";
+
+function RoleOptions({ allowTech }: { allowTech: boolean }) {
+  return (
+    <>
+      <option value="TEACHER">Professor — vê só as próprias turmas</option>
+      <option value="ADMIN">Coordenação — vê e gerencia tudo</option>
+      {allowTech && <option value="TECH">Administrador tech — tudo + uso do sistema</option>}
+    </>
+  );
+}
+
+export function CreateTeacherForm({ allowTech }: { allowTech: boolean }) {
   const [state, formAction] = useActionState(createTeacher, undefined);
   return (
     <form action={formAction} className="space-y-4">
@@ -62,8 +74,7 @@ export function CreateTeacherForm() {
         </div>
         <Field label="Perfil">
           <select name="role" defaultValue="TEACHER" className={inputStyles}>
-            <option value="TEACHER">Professor — vê só as próprias turmas</option>
-            <option value="ADMIN">Coordenação — vê e gerencia tudo</option>
+            <RoleOptions allowTech={allowTech} />
           </select>
         </Field>
       </div>
@@ -79,9 +90,11 @@ export function CreateTeacherForm() {
 export function ManageTeacherForms({
   user,
   isSelf,
+  allowTech,
 }: {
-  user: { id: string; name: string; role: "ADMIN" | "TEACHER" };
+  user: { id: string; name: string; role: Role };
   isSelf: boolean;
+  allowTech: boolean;
 }) {
   const [pwState, pwAction] = useActionState(resetTeacherPassword, undefined);
   const [roleState, roleAction] = useActionState(updateTeacherRole, undefined);
@@ -108,8 +121,7 @@ export function ManageTeacherForms({
           Perfil
         </label>
         <select id={`role-${user.id}`} name="role" defaultValue={user.role} disabled={isSelf} className={inputStyles}>
-          <option value="TEACHER">Professor</option>
-          <option value="ADMIN">Coordenação</option>
+          <RoleOptions allowTech={allowTech || user.role === "TECH"} />
         </select>
         <ErrorMessage message={roleState?.error} />
         <SuccessMessage message={roleState?.success} />

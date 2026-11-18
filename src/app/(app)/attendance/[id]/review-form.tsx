@@ -337,6 +337,7 @@ export function ReviewForm({
                   <li key={s.id}>
                     <button
                       type="button"
+                      data-track={on ? "Desmarcar presença manual" : "Marcar presença manual"}
                       aria-pressed={on}
                       onClick={() => toggleManual(s.id)}
                       className={`flex min-h-14 w-full items-center gap-3 rounded-xl border px-3 py-2 text-left transition-colors ${

@@ -1,9 +1,10 @@
 // Cria (ou redefine a senha de) um professor/administrador. Não há cadastro público.
 //
-//   npm run user:create -- <email> <senha> "<Nome>" [--coordenacao]
+//   npm run user:create -- <email> <senha> "<Nome>" [--coordenacao | --tech]
 //
 // --coordenacao: acesso de coordenação (vê e gerencia todas as turmas e professores).
-// Sem a opção, cria um professor (vê só as turmas pelas quais é responsável).
+// --tech: administrador tech (tudo da coordenação + tela "Uso do sistema").
+// Sem opção, cria um professor (vê só as turmas pelas quais é responsável).
 
 import "dotenv/config";
 import { z } from "zod";
@@ -18,10 +19,10 @@ const args = z.tuple([
 
 async function main() {
   const argv = process.argv.slice(2);
-  const role = argv.includes("--coordenacao") ? "ADMIN" : "TEACHER";
-  const parsed = args.safeParse(argv.filter((a) => a !== "--coordenacao"));
+  const role = argv.includes("--tech") ? "TECH" : argv.includes("--coordenacao") ? "ADMIN" : "TEACHER";
+  const parsed = args.safeParse(argv.filter((a) => a !== "--coordenacao" && a !== "--tech"));
   if (!parsed.success) {
-    console.error('Uso: npm run user:create -- <email> <senha> "<Nome>" [--coordenacao]');
+    console.error('Uso: npm run user:create -- <email> <senha> "<Nome>" [--coordenacao | --tech]');
     console.error(parsed.error.issues.map((i) => `- ${i.message}`).join("\n"));
     process.exit(1);
   }
@@ -33,10 +34,10 @@ async function main() {
     where: { email },
     create: { email, name, passwordHash, role },
     // Redefinir a senha desconecta os aparelhos que usavam a antiga.
-    // Sem --coordenacao, o perfil de um usuário existente não muda.
-    update: { name, passwordHash, ...(role === "ADMIN" ? { role } : {}), sessionVersion: { increment: 1 } },
+    // Sem --coordenacao/--tech, o perfil de um usuário existente não muda.
+    update: { name, passwordHash, ...(role !== "TEACHER" ? { role } : {}), sessionVersion: { increment: 1 } },
   });
-  console.log(`Usuário pronto: ${user.email} (${role === "ADMIN" ? "coordenação" : "professor"})`);
+  console.log(`Usuário pronto: ${user.email} (${{ ADMIN: "coordenação", TECH: "administrador tech", TEACHER: "professor" }[role]})`);
 }
 
 main()
